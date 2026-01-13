@@ -55,11 +55,9 @@ def main():
 	logger.info(json.dumps(vars(args), ensure_ascii=False))
 	
 	for idx, g in enumerate(graphs):
-		with open(f"{args.outputs_path}/R_stars_{idx}.json", "r") as f:
-			R_stars = json.load(f)
 		trainer = SelfSupervisedTrainer(
 		data_path=args.data_path, 
-		outputs=R_stars,
+		outputs=g["induction_output"],
 		encoder=args.encoder,
 		text_encoder_name=args.text_encoder,
 		device=args.device,
