@@ -11,8 +11,7 @@ import numpy as np
 def parse_args():
 	p = argparse.ArgumentParser()
 
-	p.add_argument('--data_path', type=str, default="",help="Path of grount-truth graph execution results")
-	p.add_argument('--outputs_path', type=str, default="",help="Path of reasoning output induction results")
+	p.add_argument('--data_path', type=str, default="",help="Path of reasoning outputs and grount-truth")
 	p.add_argument('--domain', type=str, default="",choices=['gsm8k', 'mmlu', 'svamp', 'humaneval'],help="Domain of the dataset")
 	p.add_argument('--device', type=str, default="cuda:0")
 	p.add_argument('--text_encoder', type=str, default='/data/llm/all-MiniLM-L6-v2')
