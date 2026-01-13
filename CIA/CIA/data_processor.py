@@ -5,25 +5,84 @@ from typing import List, Dict, Tuple, Any
 from torch_geometric.data import Data
 import networkx as nx
 from collections import defaultdict
+import os
+from pathlib import Path
+from difflib import SequenceMatcher
 
 class GraphDataProcessor:
     
     def __init__(self):
         self.node_id_to_idx = {}
         self.idx_to_node_id = {}
+    
+    def _calculate_similarity(self, text1: str, text2: str) -> float:
+        if not text1 or not text2:
+            return 0.0
+        return SequenceMatcher(None, te.
+        xt1.lower(), text2.lower()).ratio()
+    
+    def _match_nodes_to_outputs(self, nodes: List[Dict], output_list: List[str]) -> Dict[str, int]:
+        node_id_to_idx = {}
+        used_indices = set()
+        max_idx = len(output_list) - 1 
+        for node in nodes:
+            node_output = node.get('node_outputs', '')
+            if not node_output:
+                for idx in range(max_idx + 1):
+                    if idx not in used_indices:
+                        node_id_to_idx[node['node_id']] = idx
+                        used_indices.add(idx)
+                        break
+                else:
+                    max_idx += 1
+                    node_id_to_idx[node['node_id']] = max_idx
+                    used_indices.add(max_idx)
+                continue
+            
+            similarities = []
+            for idx, output in enumerate(output_list):
+                if idx in used_indices:
+                    similarity = -1 
+                else:
+                    similarity = self._calculate_similarity(node_output, output)
+                similarities.append((idx, similarity))
+            
+            best_match = max(similarities, key=lambda x: x[1])
+            if best_match[1] > 0:
+                matched_idx = best_match[0]
+                node_id_to_idx[node['node_id']] = matched_idx
+                used_indices.add(matched_idx)
+            else:
+
+                for idx in range(max_idx + 1):
+                    if idx not in used_indices:
+                        node_id_to_idx[node['node_id']] = idx
+                        used_indices.add(idx)
+                        break
+                else:
+                    max_idx += 1
+                    node_id_to_idx[node['node_id']] = max_idx
+                    used_indices.add(max_idx)
+        
+        return node_id_to_idx
         
     def load_data(self, json_file_path: str) -> List[Dict]:
-        with open(json_file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return data
-    
+        path = Path(json_file_path)
+        all_data = []
+        json_files = path.glob('*.json')
+        for json_file in json_files:
+            with open(json_file, 'r', encoding='utf-8') as f:
+                file_data = json.load(f)
+                all_data.extend(file_data)
+        return all_data
+
     
     def build_edge_index(self, graph_data: Dict) -> torch.Tensor:
-        nodes = graph_data['nodes']
-        self.node_id_to_idx = {node['node_id']: idx for idx, node in enumerate(nodes,start=1)}
-        self.idx_to_node_id = {idx: node['node_id'] for idx, node in enumerate(nodes,start=1)}
-        self.node_id_to_idx[graph_data["decision"]['decision_node_id']]=0
-        self.idx_to_node_id[0]=graph_data["decision"]['decision_node_id']
+        output_list = graph_data[0] 
+        nodes = graph_data[1]['nodes']
+        node_id_to_idx = self._match_nodes_to_outputs(nodes, output_list)
+        self.node_id_to_idx = node_id_to_idx.copy()
+        self.idx_to_node_id = {idx: node_id for node_id, idx in node_id_to_idx.items()}
         edges = []
         for node in nodes:
             node_idx = self.node_id_to_idx[node['node_id']]
@@ -66,9 +125,10 @@ class GraphDataProcessor:
         return edge_index
     
     def build_adjacency_matrix(self, graph_data: Dict) -> torch.Tensor:
-        num_nodes = len(graph_data['nodes'])+1
+        nodes = graph_data[1]['nodes']
+        num_nodes = len(nodes)+1
         adj_matrix = torch.zeros((num_nodes, num_nodes))
-        for node in graph_data['nodes']:
+        for node in nodes:
             node_idx = self.node_id_to_idx[node['node_id']]
             for pred in node.get('spatial_predecessors', []):
                 if '(' in pred:
@@ -84,7 +144,7 @@ class GraphDataProcessor:
                         succ_idx = self.node_id_to_idx[succ_id]
                         adj_matrix[node_idx, succ_idx] = 1
 
-        for node in graph_data['nodes']:
+        for node in nodes:
             node_idx = self.node_id_to_idx[node['node_id']]
             for pred in node.get('temporal_predecessors', []):
                 if '(' in pred:
@@ -103,18 +163,21 @@ class GraphDataProcessor:
         
         return adj_matrix
     
+    def extract_induction_output(self, graph_data: Dict) -> str:
+        induction_output = []
+        for data in graph_data:
+            induction_output.append(data[0])
+        return induction_output
+    
     def process_single_graph(self, graph_data: Dict) -> Dict[str, Any]:
         edge_index = self.build_edge_index(graph_data[0])
         adj_matrix = self.build_adjacency_matrix(graph_data[0])
-        task=[]
-        for i in range(1, len(graph_data)):
-            task.append(graph_data[i]['task'])
+        induction_output=self.extract_induction_output(graph_data[0][0])
         return {
             'edge_index': edge_index,
             'adjacency_matrix': adj_matrix,
-            'num_nodes': len(graph_data[0]['nodes'])+1,
-            'graph_id': graph_data[0].get('graph_id', 'unknown'),
-            'task':task
+            'num_nodes': len(graph_data[0][1]['nodes'])+1,
+            'induction_output': induction_output
         }
     
     def process_all_graphs(self, json_file_path: str) -> List[Dict[str, Any]]:
