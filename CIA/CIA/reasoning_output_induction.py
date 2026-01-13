@@ -121,7 +121,7 @@ class ReasoningOutputInduction:
                     R_stars.append(R_star)
                     R_stars.append({'decision': {'decision_node_id': decision_node.id, 'decision_node_role': decision_node.role,"decision_output":R_star[-1]}, 'nodes': nodes_data})
                     data_list.append(R_stars)
-                with open(f"/{self.domain}/reasoning_outputs/data_list/{i_batch}_{i_record}.json", "w") as f:
+                with open(f"/{self.domain}/reasoning_outputs/{i_batch}_{i_record}.json", "w") as f:
                     json.dump(data_list, f)
 
     
