@@ -392,9 +392,8 @@ class Graph(ABC):
         if len(final_answers) == 0:
             final_answers.append("No answer of the decision node")
 
-        self._save_results_to_json(input, final_answers, log_probs)
         decision_outputs = self.decision_node.outputs if hasattr(self.decision_node, 'outputs') and self.decision_node.outputs else []
-        return final_answers, log_probs,decision_outputs
+        return final_answers, log_probs,self.decision_node,self.nodes
     
     def _get_result_record(self, input_data: Dict[str, str], final_answers: List[Any], log_probs: float) -> Dict[str, Any]:
         nodes_data = []
