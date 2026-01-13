@@ -87,7 +87,7 @@ class SelfSupervisedModel(nn.Module):
             
         return g_list
 
-    def forward(self, node_outputs: List[str], task, pair_log, training: bool = True) -> Dict[str, torch.Tensor]:
+    def forward(self, node_outputs: List[str], pair_log, training: bool = True) -> Dict[str, torch.Tensor]:
         g_list = self.get_sentence_embeddings(node_outputs)
         g_stack = torch.stack(g_list, dim=0)
         if g_stack.dim() == 3 and g_stack.size(1) == 1:
@@ -157,15 +157,17 @@ class SelfSupervisedModel(nn.Module):
         with torch.no_grad():
             sim = torch.zeros(len(node_outputs), len(node_outputs), device=self.device)
             for i in range(len(node_outputs)):
-                for j in range(len(node_outputs)):
+                for j in range(i, len(node_outputs)):
                     if i == j:
                         sim[i][j] = 0
                     else:
                         p_i_norm = F.normalize(self.p_list[i].unsqueeze(0), p=2, dim=1)
                         p_j_norm = F.normalize(self.p_list[j].unsqueeze(0), p=2, dim=1)
-                        out = self.link_predictor(p_i_norm, p_j_norm)
-                        out = out.mean(dim=1)
-                        sim[i][j] = out.squeeze()
+                        out_ij = self.link_predictor(p_i_norm, p_j_norm).mean(dim=1).squeeze()
+                        out_ji = self.link_predictor(p_j_norm, p_i_norm).mean(dim=1).squeeze()
+                        sim_value = (out_ij + out_ji) / 2.0
+                        sim[i][j] = sim_value
+                        sim[j][i] = sim_value
             mask = ~torch.eye(len(node_outputs), dtype=torch.bool, device=sim.device)
             non_diag_values = sim[mask]
             if len(non_diag_values) > 0:
