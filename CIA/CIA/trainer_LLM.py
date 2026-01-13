@@ -57,8 +57,6 @@ Provide strictly a raw JSON list in the following format. Do not include any int
 
 EDGES_USER_TPL_GLOBAL_MI = """
 Here is the data for the current analysis session.
-**[Task Description]**
-{task}
 **[Agent Output Records]**
 {nodes_block}
 Based on the criteria defined in the system instructions, please Output the Top 3 Highest Confidence Edges in raw JSON format.
@@ -196,14 +194,13 @@ class SelfSupervisedTrainer:
 
 
 	def _build_global_edges_messages_llm(self,
-                                         task: str,
                                          node_ids: list,
                                          node_outputs: list,
                                          ):
 		nodes_block = "\n".join([f"- {nid}: {node_outputs[i][0]!r}" for i, nid in enumerate(node_ids)])
 		return [
 			{"role": "system", "content": EDGES_SYSTEM_GLOBAL_MI},
-			{"role": "user", "content": EDGES_USER_TPL_GLOBAL_MI.format(task=task or "", nodes_block=nodes_block)},
+			{"role": "user", "content": EDGES_USER_TPL_GLOBAL_MI.format(nodes_block=nodes_block)},
 		]
 	def _safe_json_loads_for_edges(self, s: str):
 		s = (s or "").strip()
@@ -222,14 +219,12 @@ class SelfSupervisedTrainer:
 
 	@torch.no_grad()
 	def llm_predict_edges_global_llm(self,
-                                task: str,
                                 id_list: list,
                                 node_texts: list[str],
                                 device: str | None = None):
 
 
 		messages_edges = self._build_global_edges_messages_llm(
-			task=task,
 			node_ids=id_list,
 			node_outputs=node_texts,
 		)
@@ -270,18 +265,14 @@ class SelfSupervisedTrainer:
 		sim_accum = None
 		node_outputs_all: List[List[str]] = self.outputs
 		true_adj = g['adjacency_matrix'].to(self.device)
-		node_outputs_batch = list(zip(*node_outputs_all))
-		first_perturb_group = node_outputs_batch[0] if node_outputs_batch else []
-		node_outputs_group = [[text] for text in self.outputs[0]]
-		task_for_llm = g["task"][0] if isinstance(g["task"], list) else g["task"]
+		first_perturb_group = node_outputs_all[0]
 		pair_log = self.llm_predict_edges_global_llm(
-				task=task_for_llm,
-				id_list=[str(i) for i in range(len(node_outputs_all))], 
-				node_texts=node_outputs_group,
+				id_list=[str(i) for i in range(len(first_perturb_group))], 
+				node_texts=first_perturb_group,
 				device=str(self.device),
 			)
 		
-		num_nodes = len(node_outputs_all)
+		num_nodes = len(node_outputs_all[0])
 		pair_log_adj = torch.zeros((num_nodes, num_nodes), device=self.device)
 		for edge in pair_log:
 			if len(edge) == 2:
@@ -289,7 +280,8 @@ class SelfSupervisedTrainer:
 				if 0 <= source_id < num_nodes and 0 <= target_id < num_nodes:
 					pair_log_adj[source_id, target_id] = 1.0
 		self.optimizer.zero_grad()
-		node_outputs = node_outputs_all
+		# 将 node_outputs_all 从按 perturb 组织转换为按 agent 组织
+		node_outputs = [list(x) for x in zip(*node_outputs_all)]
 		task=g['task']
 		outputs = self.model(node_outputs, task,pair_log)
 		s_loss = outputs['s_loss']
@@ -327,6 +319,9 @@ class SelfSupervisedTrainer:
 		sim = sim_accum / max(1, num_groups)
 		pred_adj = (sim > self.edge_threshold).float()
 		pred_adj.fill_diagonal_(0)
+		# 将下三角部分（i > j）置为0
+		mask_lower = torch.tril(torch.ones_like(pred_adj), diagonal=-1).bool()
+		pred_adj[mask_lower] = 0
 		true_adj = true_adj.to(pred_adj.device)
 		acc = self._calc_accuracy(pred_adj, true_adj)
 		f1 = self._calc_f1(pred_adj, true_adj)
@@ -370,18 +365,13 @@ class SelfSupervisedTrainer:
 				if 0 <= source_id < num_nodes and 0 <= target_id < num_nodes:
 					pair_log_adj[source_id, target_id] = 1.0
 		pair_log_adj.fill_diagonal_(0)
-		node_outputs = node_outputs_all
-		task=g['task']
-		outputs = self.model(node_outputs, task,pair_log,training=False)
+		node_outputs = [list(x) for x in zip(*node_outputs_all)]
+		outputs = self.model(node_outputs,pair_log,training=False)
 		sim = outputs['sim']
-		if sim_accum is None:
-			sim_accum = sim.clone()
-		else:
-			sim_accum += sim
-		num_groups=1
-		sim = sim_accum / max(1, num_groups)
 		pred_adj = (sim > self.edge_threshold).float()
 		pred_adj.fill_diagonal_(0)
+		mask_lower = torch.tril(torch.ones_like(pred_adj), diagonal=-1).bool()
+		pred_adj[mask_lower] = 0
 		true_adj = true_adj.to(pred_adj.device)
 		acc = self._calc_accuracy(pred_adj, true_adj)
 		f1 = self._calc_f1(pred_adj, true_adj)
