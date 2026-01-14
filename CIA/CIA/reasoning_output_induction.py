@@ -68,7 +68,6 @@ class ReasoningOutputInduction:
             self.graph.mlp.load_state_dict(checkpoint['mlp_state_dict'])
     
     async def process(self):
-        """异步处理方法，执行实际的推理输出归纳"""
         def dataloader(data_list, batch_size, i_batch):
             return data_list[i_batch*batch_size:i_batch*batch_size + batch_size]
         
