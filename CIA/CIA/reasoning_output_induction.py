@@ -9,6 +9,10 @@ import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union, Literal
 import random
+
+sys.path.append('/data/CIA/GDesigner-main')
+
+
 from GDesigner.graph.graph import Graph
 from GDesigner.tools.reader.readers import JSONLReader
 from GDesigner.utils.const import GDesigner_ROOT
@@ -46,8 +50,6 @@ class ReasoningOutputInduction:
         self.model_name = model_name
         self.num_rounds = num_rounds
         self.agent_names = [name for name, num in zip(agent_names, agent_nums) for _ in range(num)]
-        def dataloader(data_list, batch_size, i_batch):
-            return data_list[i_batch*batch_size:i_batch*batch_size + batch_size]
         kwargs = self._get_kwargs(mode, len(self.agent_names))
         graph = Graph(
             domain=domain,
@@ -58,15 +60,20 @@ class ReasoningOutputInduction:
             model_name=model_name,
             **kwargs
         )
-        num_batches = int(len(self.dataset)/self.batch_size)
+        self.graph = graph
+        self.num_batches = int(len(self.dataset)/self.batch_size)
         checkpoint = torch.load(model_path, map_location='cpu')
-        graph.gcn.load_state_dict(checkpoint['gcn_state_dict'])
-        if checkpoint.get('mlp_state_dict') is not None and hasattr(graph, 'mlp'):
-            graph.mlp.load_state_dict(checkpoint['mlp_state_dict'])
-        
+        self.graph.gcn.load_state_dict(checkpoint['gcn_state_dict'])
+        if checkpoint.get('mlp_state_dict') is not None and hasattr(self.graph, 'mlp'):
+            self.graph.mlp.load_state_dict(checkpoint['mlp_state_dict'])
+    
+    async def process(self):
+        """异步处理方法，执行实际的推理输出归纳"""
+        def dataloader(data_list, batch_size, i_batch):
+            return data_list[i_batch*batch_size:i_batch*batch_size + batch_size]
         
         count=0
-        for i_batch in range(num_batches):
+        for i_batch in range(self.num_batches):
             current_batch = dataloader(self.dataset, self.batch_size, i_batch)
             if current_batch is None:
                 print("No more data available.")
@@ -79,9 +86,9 @@ class ReasoningOutputInduction:
                     R_stars = []
                     flag = True
                     while flag:
-                        realized_graph = copy.deepcopy(graph)
-                        realized_graph.gcn = graph.gcn
-                        realized_graph.mlp = graph.mlp
+                        realized_graph = copy.deepcopy(self.graph)
+                        realized_graph.gcn = self.graph.gcn
+                        realized_graph.mlp = self.graph.mlp
                         task = record["task"]
                         answer = record["answer"]
 
@@ -121,7 +128,7 @@ class ReasoningOutputInduction:
                     R_stars.append(R_star)
                     R_stars.append({'decision': {'decision_node_id': decision_node.id, 'decision_node_role': decision_node.role,"decision_output":R_star[-1]}, 'nodes': nodes_data})
                     data_list.append(R_stars)
-                with open(f"/{self.domain}/reasoning_outputs/{i_batch}_{i_record}.json", "w") as f:
+                with open(f"/{self.domain}/reasoning_outputs/data_list/{i_batch}_{i_record}.json", "w") as f:
                     json.dump(data_list, f)
 
     
@@ -198,9 +205,9 @@ def parse_args():
     
     parser.add_argument('--model_path', type=str, default="xxx",
                        help='Path of the model (.pt file)')
-    parser.add_argument('--dataset_path', type=str, default="xxx",
+    parser.add_argument('--dataset_path', type=str, default="/data/wuyongxuan/CIA/GDesigner-main/datasets/humaneval/humaneval-py.jsonl",
                        help='Path of the dataset')
-    parser.add_argument('--domain', type=str, default="xxx",
+    parser.add_argument('--domain', type=str, default="humaneval",
                        choices=['gsm8k', 'mmlu', 'svamp', 'humaneval'],
                        help='Domain of the dataset')
     parser.add_argument('--llm_name', type=str, default='gpt-5',
@@ -220,11 +227,8 @@ def parse_args():
     
     return parser.parse_args()
 
-def load_dataset(self, dataset_path: str, dataset_type: str = None) -> List[Dict[str, Any]]:
-
-        if dataset_type is None:
-            dataset_type = self.domain
-        
+def load_dataset(dataset_path: str, dataset_type: str = None) -> List[Dict[str, Any]]:
+   
         print(f"Loading {dataset_type} dataset: {dataset_path}")
         
         if dataset_type == "gsm8k":
@@ -234,21 +238,28 @@ def load_dataset(self, dataset_path: str, dataset_type: str = None) -> List[Dict
             return processed_data
         
         elif dataset_type == "svamp":
-            dataset = JSONLReader.parse_file(dataset_path)
+            with open(dataset_path, 'r',encoding='utf-8') as file:
+                dataset = json.load(file)
             from datasets.gsm8k_dataset import svamp_data_process_adversial
             processed_data = svamp_data_process_adversial(dataset)
             return processed_data
         
         elif dataset_type == "mmlu":
             from datasets.mmlu_dataset import MMLUDataset
-            dataset_train = MMLUDataset('dev')
-            dataset_val = MMLUDataset('val')
-            dataset_val._total_df_adversial = dataset_val._total_df_adversial.head(100).reset_index(drop=True)
-            return dataset_val._total_df_adversial
+            dataset_train = MMLUDataset('dev',dataset_path)
+            dataset_val = MMLUDataset('val',dataset_path)
+            dataset=dataset_val
+            records=[]
+            for record in dataset:
+                task=dataset.record_to_input_adversial(record)
+                records.append(task)
+            return records
         
         elif dataset_type == "humaneval":
             dataset = JSONLReader.parse_file(dataset_path)
-            return dataset
+            from datasets.humaneval_dataset import humaneval_data_process
+            processed_data = humaneval_data_process(dataset)
+            return processed_data
 
 async def main():
     args = parse_args()
@@ -267,6 +278,7 @@ async def main():
         model_name=args.model_name,
         num_rounds=args.num_rounds,
     )
+    await induction.process()
 
 
 
