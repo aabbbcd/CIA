@@ -205,9 +205,9 @@ def parse_args():
     
     parser.add_argument('--model_path', type=str, default="xxx",
                        help='Path of the model (.pt file)')
-    parser.add_argument('--dataset_path', type=str, default="/data/wuyongxuan/CIA/GDesigner-main/datasets/humaneval/humaneval-py.jsonl",
+    parser.add_argument('--dataset_path', type=str, default="xxx",
                        help='Path of the dataset')
-    parser.add_argument('--domain', type=str, default="humaneval",
+    parser.add_argument('--domain', type=str, default="xxx",
                        choices=['gsm8k', 'mmlu', 'svamp', 'humaneval'],
                        help='Domain of the dataset')
     parser.add_argument('--llm_name', type=str, default='gpt-5',
